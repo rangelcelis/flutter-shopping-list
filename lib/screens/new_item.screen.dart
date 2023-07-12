@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:shopping_list/data/categories.dart';
 import 'package:shopping_list/models/category.dart';
 import 'package:shopping_list/models/grocery_item.dart';
@@ -12,24 +15,70 @@ class NewItemScreen extends StatefulWidget {
 
 class _NewItemScreenState extends State<NewItemScreen> {
   final _formKey = GlobalKey<FormState>();
+  bool submitting = false;
 
   String _enteredName = '';
   int _enteredQuantity = 1;
   Category _enteredCategory = categories[Categories.other]!;
 
-  void _saveItem() {
+  void _saveItem() async {
     if (_formKey.currentState!.validate()) {
       _formKey.currentState!.save();
 
-      Navigator.of(context).pop(
-        GroceryItem(
-          id: DateTime.now().toString(),
-          name: _enteredName,
-          quantity: _enteredQuantity,
-          category: _enteredCategory,
+      setState(() {
+        submitting = true;
+      });
+
+      final response = await http.post(
+        Uri.https('flutter-prep-21920-default-rtdb.firebaseio.com',
+            'shopping-list.json'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: json.encode(
+          {
+            'name': _enteredName,
+            'quantity': _enteredQuantity.toString(),
+            'category': _enteredCategory.name,
+          },
         ),
       );
+
+      if (!context.mounted) {
+        return;
+      }
+
+      if (response.statusCode == 200) {
+        final newId = json.decode(response.body)['name'];
+
+        Navigator.of(context).pop(
+          GroceryItem(
+            id: newId,
+            name: _enteredName,
+            quantity: _enteredQuantity,
+            category: _enteredCategory,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Error saving item'),
+          ),
+        );
+
+        setState(() {
+          submitting = false;
+        });
+      }
     }
+  }
+
+  void _resetForm() {
+    _formKey.currentState!.reset();
+
+    setState(() {
+      _enteredCategory = categories[Categories.other]!;
+    });
   }
 
   @override
@@ -67,7 +116,7 @@ class _NewItemScreenState extends State<NewItemScreen> {
                 children: [
                   Expanded(
                     child: TextFormField(
-                      initialValue: _enteredQuantity.toString(),
+                      initialValue: '1',
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
                         label: Text('Quantity'),
@@ -117,12 +166,18 @@ class _NewItemScreenState extends State<NewItemScreen> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed: () => _formKey.currentState!.reset(),
+                    onPressed: submitting ? null : _resetForm,
                     child: const Text('Reset'),
                   ),
                   ElevatedButton(
-                    onPressed: _saveItem,
-                    child: const Text('Add Item'),
+                    onPressed: submitting ? null : _saveItem,
+                    child: submitting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(),
+                          )
+                        : const Text('Add Item'),
                   ),
                 ],
               )

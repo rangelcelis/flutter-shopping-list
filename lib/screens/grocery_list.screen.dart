@@ -1,4 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:shopping_list/data/categories.dart';
+import 'package:shopping_list/models/category.dart';
 import 'package:shopping_list/models/grocery_item.dart';
 import 'package:shopping_list/screens/new_item.screen.dart';
 
@@ -10,9 +15,59 @@ class GroceryListScreen extends StatefulWidget {
 }
 
 class _GroceryListScreenState extends State<GroceryListScreen> {
-  final _groceryItems = <GroceryItem>[];
+  List<GroceryItem> _groceryItems = [];
+  bool _isLoading = true;
+  bool _hasError = false;
 
-  void _handleAddItemTap() async {
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  void _loadData() async {
+    final response = await http.get(
+      Uri.https('flutter-prep-21920-default-rtdb.firebaseio.com',
+          'shopping-list.json'),
+    );
+
+    setState(() {
+      _isLoading = false;
+    });
+
+    if (response.statusCode >= 400) {
+      setState(() {
+        _hasError = true;
+      });
+      return;
+    }
+
+    final Map<String, dynamic> data = json.decode(response.body) ?? {};
+
+    final List<GroceryItem> tempData = [];
+    for (var item in data.entries) {
+      Category category = categories.entries
+          .firstWhere(
+            (element) => element.value.name == item.value['category'],
+          )
+          .value;
+
+      tempData.add(
+        GroceryItem(
+          id: item.key,
+          name: item.value['name'],
+          quantity: int.parse(item.value['quantity']),
+          category: category,
+        ),
+      );
+    }
+
+    setState(() {
+      _groceryItems = tempData;
+    });
+  }
+
+  void _addItem() async {
     final newItem = await Navigator.push<GroceryItem>(
       context,
       MaterialPageRoute(
@@ -20,44 +75,58 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       ),
     );
 
-    if (newItem != null) {
-      setState(() {
-        _groceryItems.add(newItem);
-      });
+    if (newItem == null) {
+      return;
     }
-  }
-
-  void _removeItem(GroceryItem item) {
-    final index = _groceryItems.indexOf(item);
 
     setState(() {
-      _groceryItems.removeAt(index);
+      _groceryItems.add(newItem);
     });
+  }
+
+  void _removeItem(GroceryItem item) async {
+    bool wasRemoved = false;
+
+    final response = await http.delete(Uri.https(
+        'flutter-prep-21920-default-rtdb.firebaseio.com',
+        'shopping-list/${item.id}.json'));
+
+    if (response.statusCode == 200) {
+      setState(() {
+        _groceryItems.remove(item);
+      });
+
+      wasRemoved = true;
+    }
+
+    if (!context.mounted) {
+      return;
+    }
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${item.name} dismissed'),
-        action: SnackBarAction(
-          label: 'UNDO',
-          onPressed: () {
-            setState(() {
-              _groceryItems.insert(index, item);
-            });
-          },
-        ),
+        content: Text(wasRemoved
+            ? '${item.name} removed from list.'
+            : 'Something went wrong. Try again later.'),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    Widget content = const Center(
+    Widget content = Center(
       child: Text(
-        'No items yet!',
-        style: TextStyle(fontSize: 20),
+        _hasError ? 'Something went wrong. Try again later.' : 'No items yet!',
+        style: const TextStyle(fontSize: 20),
         textAlign: TextAlign.center,
       ),
     );
+
+    if (_isLoading) {
+      content = const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
 
     if (_groceryItems.isNotEmpty) {
       content = ListView.builder(
@@ -99,7 +168,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.add),
-            onPressed: _handleAddItemTap,
+            onPressed: _addItem,
           ),
         ],
       ),
